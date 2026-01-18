@@ -1,0 +1,1249 @@
+{
+  "name": "jibble_auto_cleaned",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://identity.prod.jibble.io/connect/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "YOUR_JIBBLE_CLIENT_ID"
+            },
+            {
+              "name": "client_secret",
+              "value": "YOUR_JIBBLE_CLIENT_SECRET"
+            },
+            {
+              "name": "audience",
+              "value": "https://api.jibble.io"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        992,
+        32
+      ],
+      "id": "d2f970c7-7548-46a2-a92f-9ef37f3d28c6",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "url": "https://time-attendance.prod.jibble.io/v1/Timesheets",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "$count",
+              "value": "true"
+            },
+            {
+              "name": "$expand",
+              "value": "person"
+            },
+            {
+              "name": "$orderby",
+              "value": "person/fullName asc"
+            },
+            {
+              "name": "$skip",
+              "value": "0"
+            },
+            {
+              "name": "$top",
+              "value": "100"
+            },
+            {
+              "name": "period",
+              "value": "Week"
+            },
+            {
+              "name": "date",
+              "value": "={{ $today.format('yyyy-MM-dd') }}"
+            },
+            {
+              "name": "random",
+              "value": "={{$now}}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.access_token}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1232,
+        16
+      ],
+      "id": "b5b01443-4611-44c2-be63-59753cd6c211",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- CONFIGURATION ---\nconst attendanceNodeName = 'HTTP Request2'; \nconst phonebookNodeName = 'Code in JavaScript3'; \nconst TIMEZONE = 'Asia/Karachi'; // Force Pakistan Time\n// ---------------------\n\n// 1. FETCH DATA\nconst rawAttendance = $(attendanceNodeName).first().json;\n// Handle cases where Jibble returns value wrapper or direct array\nlet attendanceList = rawAttendance.value || (Array.isArray(rawAttendance) ? rawAttendance : []);\nif (!attendanceList.length && $(attendanceNodeName).all().length > 0) {\n    attendanceList = $(attendanceNodeName).all().map(i => i.json);\n}\n\n// Get Phonebook Data\nconst phoneBookData = $(phonebookNodeName).first().json;\nconst phoneBook = phoneBookData.phoneBook || {};\n\n// 2. SETUP DATES (TIMEZONE FIXED)\nconst today = new Date();\n\n// Get YYYY-MM-DD specifically for Pakistan\n// 'en-CA' locale forces YYYY-MM-DD format\nconst todayStr = today.toLocaleDateString('en-CA', { timeZone: TIMEZONE });\n\n// Get Pretty Date for the message (e.g., Thursday, January 15, 2026)\nconst formattedDate = today.toLocaleDateString('en-US', { \n    weekday: 'long', \n    year: 'numeric', \n    month: 'long', \n    day: 'numeric',\n    timeZone: TIMEZONE \n});\n\n// 3. DEBUGGING LOG\nconst debugLog = [];\ndebugLog.push(`Server Time (UTC): ${today.toISOString()}`);\ndebugLog.push(`Target Date (PKT): ${todayStr}`);\ndebugLog.push(`Attendance List Size: ${attendanceList.length}`);\n\nconst messagesToSend = [];\n\n// 4. MAIN LOGIC\nif (Array.isArray(attendanceList)) {\n  attendanceList.forEach(record => {\n    // Handle Jibble structure variations\n    const person = record.person || record;\n    const fullName = person.fullName;\n\n    if (!fullName) return;\n\n    // Check Clock In Logic\n    const dailyEntries = record.daily || [];\n    \n    // STRICT MATCH: Find the entry where the date matches Pakistan's current date\n    const todayEntry = dailyEntries.find(day => day.date === todayStr);\n    \n    // Check if they have a timestamp OR if 'total' tracked time is greater than 0\n    // Sometimes firstInTimestamp is null but total is updated\n    const hasTimestamp = todayEntry && todayEntry.firstInTimestamp;\n    const hasTrackedTime = todayEntry && todayEntry.total && todayEntry.total !== 'PT0S';\n    \n    const hasClockedIn = hasTimestamp || hasTrackedTime;\n\n    // IF ABSENT\n    if (!hasClockedIn) {\n      const searchName = fullName.trim().toLowerCase();\n      const phoneNumber = phoneBook[searchName];\n\n      if (phoneNumber) {\n        messagesToSend.push({\n          json: {\n            send_message: true, \n            chatId: `${phoneNumber}@c.us`,\n            name: fullName,\n            message_body: `Dear ${person.firstName || fullName},\\n\\nThis is an automated reminder regarding your attendance for today, ${formattedDate}. Our records indicate that you have not yet clocked in.\\n\\nPlease ensure your attendance is logged as soon as possible. If you are experiencing technical issues or are on approved leave, please notify your supervisor or the HR department.\\n\\nBest regards,\\nManagement Team`\n          }\n        });\n      } else {\n        debugLog.push(`Skipped ${fullName}: No number found.`);\n      }\n    } else {\n        // Optional: Log who was found present for debugging\n        // debugLog.push(`Present: ${fullName}`);\n    }\n  });\n}\n\n// 5. OUTPUT\nif (messagesToSend.length > 0) {\n  return messagesToSend;\n} else {\n  return [\n    {\n      json: {\n        send_message: false,\n        status: \"No Messages Generated\",\n        debug_report: debugLog\n      }\n    }\n  ];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        224
+      ],
+      "id": "dc78b2f2-7121-4b46-9d96-4b7eee582c7d",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- CONFIGURATION ---\nconst attendanceNodeName = 'HTTP Request4'; \nconst phonebookNodeName = 'Code in JavaScript4'; \n// ---------------------\n\n// 1. FETCH DATA\n// Get Jibble Data\nconst rawAttendance = $(attendanceNodeName).first().json;\nlet attendanceList = rawAttendance.value || $(attendanceNodeName).all().map(i => i.json);\n\n// Get Phonebook Data\nconst phoneBookData = $(phonebookNodeName).first().json;\nconst phoneBook = phoneBookData.phoneBook || {};\n\n// 2. SETUP\nconst debugLog = [];\nconst messagesToSend = [];\nconst today = new Date();\nconst todayStr = today.toISOString().split('T')[0];\nconst formattedDate = today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n\n// 3. MAIN LOGIC\nif (Array.isArray(attendanceList)) {\n  attendanceList.forEach(record => {\n    // Handle structure variations\n    const person = record.person || record;\n    const fullName = person.fullName;\n\n    if (!fullName) return;\n\n    // Get Today's Entry\n    const dailyEntries = record.daily || [];\n    const todayEntry = dailyEntries.find(day => day.date === todayStr);\n\n    let inTime = null;\n    let outTime = null;\n\n    if (todayEntry) {\n      inTime = todayEntry.firstInTimestamp;\n      outTime = todayEntry.lastOutTimestamp;\n    }\n\n    // CHECK: Clocked In AND (NOT Clocked Out)\n    if (inTime && !outTime) {\n      \n      // 1. Check Phonebook\n      const searchName = fullName.trim().toLowerCase();\n      const phoneNumber = phoneBook[searchName];\n\n      if (phoneNumber) {\n        // 2. Format the Clock In Time (Asia/Karachi)\n        const dateObj = new Date(inTime);\n        const readableTime = dateObj.toLocaleTimeString('en-US', { \n          hour: '2-digit', \n          minute: '2-digit', \n          hour12: true,\n          timeZone: 'Asia/Karachi'\n        });\n\n        // 3. Add to Message List\n        messagesToSend.push({\n          json: {\n            send_message: true,\n            chatId: `${phoneNumber}@c.us`,\n            name: fullName,\n            // --- UPDATED PROFESSIONAL MESSAGE ---\n              message_body: `*ATTENDANCE NOTIFICATION*\\n\\nDear ${person.firstName || fullName},\\n\\nOur records for ${formattedDate} show that you clocked in at *${readableTime}* but have not yet recorded a clock-out time.\\n\\nPlease ensure you clock out before concluding your shift to maintain accurate attendance and payroll records.\\n\\nIf you have already CLOCK OUT or are having trouble with the system, please reach out to your supervisor immediately.\\n\\nRegards,\\nOperations Management`\n          }\n        });\n      } else {\n        // Log skip for debugging\n        debugLog.push(`Forgot to Clock Out: ${fullName} (No Number Found - Skipped)`);\n      }\n    }\n  });\n}\n\n// 4. OUTPUT\nif (messagesToSend.length > 0) {\n  return messagesToSend;\n} else {\n  return [\n    {\n      json: {\n        send_message: false,\n        status: \"No Reminders Sent\",\n        reason: \"Everyone clocked out correctly or numbers missing.\",\n        debug_report: debugLog\n      }\n    }\n  ];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        432
+      ],
+      "id": "f480ecbe-6487-407a-a47d-d7256bf4303b",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- CONFIGURATION ---\nconst attendanceNodeName = 'HTTP Request5'; \nconst phonebookNodeName = 'Code in JavaScript5'; \n// ---------------------\n\n// 1. FETCH DATA\nconst rawAttendance = $(attendanceNodeName).first().json;\nlet attendanceList = rawAttendance.value || $(attendanceNodeName).all().map(i => i.json);\n\nconst phoneBookData = $(phonebookNodeName).first().json;\nconst phoneBook = phoneBookData.phoneBook || {};\n\n// 2. SETUP\nconst results = [];\nconst today = new Date();\nconst todayStr = today.toISOString().split('T')[0];\nconst formattedDate = today.toLocaleDateString('en-US', { \n  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' \n});\n\n// 3. MAIN LOGIC\nif (Array.isArray(attendanceList)) {\n  attendanceList.forEach(record => {\n    const person = record.person || record;\n    const fullName = person.fullName;\n\n    if (!fullName) return;\n\n    const dailyEntries = record.daily || [];\n    const todayEntry = dailyEntries.find(day => day.date === todayStr);\n\n    if (!todayEntry) return;\n\n    const inTime = todayEntry.firstInTimestamp;\n    const outTime = todayEntry.lastOutTimestamp;\n\n    // Must have BOTH\n    if (!inTime || !outTime) return;\n\n    // 🔍 PHONEBOOK CHECK\n    const searchName = fullName.trim().toLowerCase();\n    const phoneNumber = phoneBook[searchName];\n\n    // ❌ Name not in spreadsheet → DO NOTHING\n    if (!phoneNumber) return;\n\n    // --- Format Times ---\n    const inDateObj = new Date(inTime);\n    const outDateObj = new Date(outTime);\n\n    const readableInTime = inDateObj.toLocaleTimeString('en-US', { \n      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Karachi' \n    });\n\n    const readableOutTime = outDateObj.toLocaleTimeString('en-US', { \n      hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Karachi' \n    });\n\n    // --- Calculate Duration ---\n    const durationMinutes = Math.floor((outDateObj - inDateObj) / 60000);\n\n    // --- Message Logic ---\n    if (durationMinutes <= 30) {\n      results.push({\n        json: {\n          send_message: true,\n          chatId: `${phoneNumber}@c.us`,\n          name: fullName,\n          status: \"Short Duration Alert\",\n          duration_minutes: durationMinutes,\n          message_body: `*ATTENDANCE RECORDING ALERT*\\n\\nDear ${person.firstName || fullName},\\n\\nOur system has recorded a very short duration between your clock-in and clock-out for today, ${formattedDate}.\\n\\nThis usually happens when a session is not closed properly. Please ensure you **Clock OUT** correctly next time.\\n\\nRegards,\\nOperations Management`\n        }\n      });\n    }\n  });\n}\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        976
+      ],
+      "id": "5b59bbc3-9139-4348-8fd6-edf5c67fc486",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://identity.prod.jibble.io/connect/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "YOUR_JIBBLE_CLIENT_ID"
+            },
+            {
+              "name": "client_secret",
+              "value": "YOUR_JIBBLE_CLIENT_SECRET"
+            },
+            {
+              "name": "audience",
+              "value": "https://api.jibble.io"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        832,
+        448
+      ],
+      "id": "79f02de3-cc91-4192-bddf-eb803b4c66a7",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://identity.prod.jibble.io/connect/token",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "client_credentials"
+            },
+            {
+              "name": "client_id",
+              "value": "YOUR_JIBBLE_CLIENT_ID"
+            },
+            {
+              "name": "client_secret",
+              "value": "YOUR_JIBBLE_CLIENT_SECRET"
+            },
+            {
+              "name": "audience",
+              "value": "https://api.jibble.io"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        768,
+        880
+      ],
+      "id": "54fb04ba-9395-4ae2-b0e9-26c20b20b9f2",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "url": "https://time-attendance.prod.jibble.io/v1/Timesheets",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "$count",
+              "value": "true"
+            },
+            {
+              "name": "$expand",
+              "value": "person"
+            },
+            {
+              "name": "$orderby",
+              "value": "person/fullName asc"
+            },
+            {
+              "name": "$skip",
+              "value": "0"
+            },
+            {
+              "name": "$top",
+              "value": "100"
+            },
+            {
+              "name": "period",
+              "value": "Week"
+            },
+            {
+              "name": "date",
+              "value": "={{ $today.format('yyyy-MM-dd') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.access_token}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        560
+      ],
+      "id": "a10b33eb-986a-44c5-87dd-4beaa4d0ee2e",
+      "name": "HTTP Request4"
+    },
+    {
+      "parameters": {
+        "url": "https://time-attendance.prod.jibble.io/v1/Timesheets",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "$count",
+              "value": "true"
+            },
+            {
+              "name": "$expand",
+              "value": "person"
+            },
+            {
+              "name": "$orderby",
+              "value": "person/fullName asc"
+            },
+            {
+              "name": "$skip",
+              "value": "0"
+            },
+            {
+              "name": "$top",
+              "value": "100"
+            },
+            {
+              "name": "period",
+              "value": "Week"
+            },
+            {
+              "name": "date",
+              "value": "={{ $today.format('yyyy-MM-dd') }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$json.access_token}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        880
+      ],
+      "id": "e8095f2a-9921-4041-95f8-540e7f9b4d70",
+      "name": "HTTP Request5"
+    },
+    {
+      "parameters": {
+        "content": "Absent or forget to clock in\n3pm"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        256
+      ],
+      "id": "24d8aa6d-27e8-4de9-946f-e18cda5d2c32",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Forget to clock out 8pm"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2720,
+        800
+      ],
+      "id": "97ad3fc6-58cb-4e8e-940d-796d912a179f",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "clock out sucessfully 3pm you forget to clock out last night clock out clock in time is same."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        992
+      ],
+      "id": "bf4de06c-773e-4c6b-93ac-dc912714afc9",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "triggerAtHour": 12,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "fb745e3e-74a8-4bbd-ac6d-ed20949f1d6a",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "triggerAtHour": 20
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -112,
+        336
+      ],
+      "id": "e6d464e0-7975-46ef-bf97-548f0ada9963",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ],
+              "triggerAtHour": 13
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -160,
+        688
+      ],
+      "id": "ca892b8e-d2e3-4301-91ab-6e2169624b4d",
+      "name": "Schedule Trigger2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7a8f41e1-fa2b-4066-9823-bbe38c5d6bc4",
+              "leftValue": "={{ $json.send_message }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1568,
+        -48
+      ],
+      "id": "b20c5acf-4492-48e7-aff4-2dd625ca2f05",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7a8f41e1-fa2b-4066-9823-bbe38c5d6bc4",
+              "leftValue": "={{ $json.send_message }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1584,
+        656
+      ],
+      "id": "4173bde7-84fd-47bf-8daa-2af946bd49c3",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "7a8f41e1-fa2b-4066-9823-bbe38c5d6bc4",
+              "leftValue": "={{ $json.send_message }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1520,
+        1168
+      ],
+      "id": "c0c4c5fc-ad7b-464d-aace-3ed365a88ab7",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FILE_ID",
+          "mode": "list",
+          "cachedResultName": "phone_detials.xlsx",
+          "cachedResultUrl": ""
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        272,
+        128
+      ],
+      "id": "a1161880-0609-469c-9d1a-20894196ce89",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kOenh6FRNokSPPiS",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        0
+      ],
+      "id": "8f7fb17b-10ed-48ee-bae8-874e55357543",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SMART DATA EXTRACTOR\nlet rows = [];\n\n// 1. Determine where the data is hiding\nif (items.length > 0 && items[0].json && (items[0].json.NAMES || items[0].json.names)) {\n  // Case A: Standard n8n (Items are rows)\n  rows = items.map(item => item.json);\n} else if (items.length > 0 && Array.isArray(items[0].json)) {\n  // Case B: The list is inside the first item\n  rows = items[0].json;\n} else {\n  // Case C: Fallback\n  rows = items.map(i => i.json || i);\n}\n\nconst phoneBook = {};\n\n// 2. Build Phonebook with Fuzzy Matching\nrows.forEach(row => {\n    // Get all keys from the row (e.g., \"NAMES\", \"NUMBERS\")\n    const keys = Object.keys(row);\n\n    // Find the key that looks like \"NAME\" (ignores case and spaces)\n    const nameKey = keys.find(k => k.trim().toUpperCase().includes('NAME'));\n    // Find the key that looks like \"NUMBER\"\n    const phoneKey = keys.find(k => k.trim().toUpperCase().includes('NUMBER'));\n\n    if (nameKey && phoneKey) {\n        const rawName = row[nameKey];\n        const rawPhone = row[phoneKey];\n\n        if (rawName && rawPhone) {\n            // Normalize: \"Ali Manan \" -> \"ali manan\"\n            const cleanName = rawName.toString().trim().toLowerCase();\n            // Normalize: \"923...\" -> \"923...\"\n            const cleanPhone = rawPhone.toString().replace(/[^0-9]/g, ''); // Keep only digits\n\n            phoneBook[cleanName] = cleanPhone;\n        }\n    }\n});\n\n// 3. Output\nreturn [\n  {\n    json: {\n      phoneBook: phoneBook,\n      debug_info: `Imported ${Object.keys(phoneBook).length} contacts.`\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        192
+      ],
+      "id": "4ce27f27-3d1f-47b8-8e8d-c76187c48578",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        400,
+        432
+      ],
+      "id": "b7abe3d2-228c-4b50-a662-ec30a38576bf",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SMART DATA EXTRACTOR\nlet rows = [];\n\n// 1. Determine where the data is hiding\nif (items.length > 0 && items[0].json && (items[0].json.NAMES || items[0].json.names)) {\n  // Case A: Standard n8n (Items are rows)\n  rows = items.map(item => item.json);\n} else if (items.length > 0 && Array.isArray(items[0].json)) {\n  // Case B: The list is inside the first item\n  rows = items[0].json;\n} else {\n  // Case C: Fallback\n  rows = items.map(i => i.json || i);\n}\n\nconst phoneBook = {};\n\n// 2. Build Phonebook with Fuzzy Matching\nrows.forEach(row => {\n    // Get all keys from the row (e.g., \"NAMES\", \"NUMBERS\")\n    const keys = Object.keys(row);\n\n    // Find the key that looks like \"NAME\" (ignores case and spaces)\n    const nameKey = keys.find(k => k.trim().toUpperCase().includes('NAME'));\n    // Find the key that looks like \"NUMBER\"\n    const phoneKey = keys.find(k => k.trim().toUpperCase().includes('NUMBER'));\n\n    if (nameKey && phoneKey) {\n        const rawName = row[nameKey];\n        const rawPhone = row[phoneKey];\n\n        if (rawName && rawPhone) {\n            // Normalize: \"Ali Manan \" -> \"ali manan\"\n            const cleanName = rawName.toString().trim().toLowerCase();\n            // Normalize: \"923...\" -> \"923...\"\n            const cleanPhone = rawPhone.toString().replace(/[^0-9]/g, ''); // Keep only digits\n\n            phoneBook[cleanName] = cleanPhone;\n        }\n    }\n});\n\n// 3. Output\nreturn [\n  {\n    json: {\n      phoneBook: phoneBook,\n      debug_info: `Imported ${Object.keys(phoneBook).length} contacts.`\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        592
+      ],
+      "id": "34ce1296-576c-4723-aed3-0ee2c0402498",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FILE_ID",
+          "mode": "list",
+          "cachedResultName": "phone_detials.xlsx",
+          "cachedResultUrl": ""
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        176,
+        400
+      ],
+      "id": "eca29032-4f5d-4388-90fc-6acd5ef919da",
+      "name": "Download file1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kOenh6FRNokSPPiS",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FILE_ID",
+          "mode": "list",
+          "cachedResultName": "phone_detials.xlsx",
+          "cachedResultUrl": ""
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        80,
+        848
+      ],
+      "id": "2cf71aa8-7a2b-4849-9793-84f922842735",
+      "name": "Download file2",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "kOenh6FRNokSPPiS",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        304,
+        896
+      ],
+      "id": "1b0fb184-8fde-48e5-bae1-0bc80ef08a03",
+      "name": "Extract from File2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SMART DATA EXTRACTOR\nlet rows = [];\n\n// 1. Determine where the data is hiding\nif (items.length > 0 && items[0].json && (items[0].json.NAMES || items[0].json.names)) {\n  // Case A: Standard n8n (Items are rows)\n  rows = items.map(item => item.json);\n} else if (items.length > 0 && Array.isArray(items[0].json)) {\n  // Case B: The list is inside the first item\n  rows = items[0].json;\n} else {\n  // Case C: Fallback\n  rows = items.map(i => i.json || i);\n}\n\nconst phoneBook = {};\n\n// 2. Build Phonebook with Fuzzy Matching\nrows.forEach(row => {\n    // Get all keys from the row (e.g., \"NAMES\", \"NUMBERS\")\n    const keys = Object.keys(row);\n\n    // Find the key that looks like \"NAME\" (ignores case and spaces)\n    const nameKey = keys.find(k => k.trim().toUpperCase().includes('NAME'));\n    // Find the key that looks like \"NUMBER\"\n    const phoneKey = keys.find(k => k.trim().toUpperCase().includes('NUMBER'));\n\n    if (nameKey && phoneKey) {\n        const rawName = row[nameKey];\n        const rawPhone = row[phoneKey];\n\n        if (rawName && rawPhone) {\n            // Normalize: \"Ali Manan \" -> \"ali manan\"\n            const cleanName = rawName.toString().trim().toLowerCase();\n            // Normalize: \"923...\" -> \"923...\"\n            const cleanPhone = rawPhone.toString().replace(/[^0-9]/g, ''); // Keep only digits\n\n            phoneBook[cleanName] = cleanPhone;\n        }\n    }\n});\n\n// 3. Output\nreturn [\n  {\n    json: {\n      phoneBook: phoneBook,\n      debug_info: `Imported ${Object.keys(phoneBook).length} contacts.`\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        880
+      ],
+      "id": "ce217a09-a178-41d5-bce9-c99d5b784554",
+      "name": "Code in JavaScript5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wawp.net/wp-json/awp/v1/send",
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"instance_id\": \"YOUR_WA_INSTANCE_ID\",\n  \"access_token\": \"YOUR_WA_ACCESS_TOKEN\",\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": {{ JSON.stringify($json.message_body) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2496,
+        -160
+      ],
+      "id": "13ff45e5-c593-4a91-8aeb-1905e43493d3",
+      "name": "HTTP Request6",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 30) + 10 }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        128
+      ],
+      "id": "b2abf4ac-333f-484c-aa0c-51fce8bd1763",
+      "name": "Wait",
+      "webhookId": "a2f5d246-6dcd-4d29-af6a-da3560d25cb5"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1872,
+        -128
+      ],
+      "id": "790b03ad-c238-4414-b13c-c5d4d516b7d3",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1872,
+        624
+      ],
+      "id": "ee982d3a-d4b9-4fdc-aba1-06a2b090c269",
+      "name": "Loop Over Items1"
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 30) + 10 }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2208,
+        544
+      ],
+      "id": "a22c4fd2-eb98-4bfb-95cd-4dc4f50442eb",
+      "name": "Wait1",
+      "webhookId": "a2f5d246-6dcd-4d29-af6a-da3560d25cb5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wawp.net/wp-json/awp/v1/send",
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"instance_id\": \"YOUR_WA_INSTANCE_ID\",\n  \"access_token\": \"YOUR_WA_ACCESS_TOKEN\",\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": {{ JSON.stringify($json.message_body) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2528,
+        592
+      ],
+      "id": "040ca40e-1bee-44aa-a8b8-38513b1518dc",
+      "name": "HTTP Request7",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1904,
+        1280
+      ],
+      "id": "aeeb3d1a-7201-49ba-9ece-3100a58fe006",
+      "name": "Loop Over Items2"
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 30) + 10 }}"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2336,
+        1184
+      ],
+      "id": "3855fed7-209d-490a-a251-18375fd4fd70",
+      "name": "Wait2",
+      "webhookId": "a2f5d246-6dcd-4d29-af6a-da3560d25cb5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://wawp.net/wp-json/awp/v1/send",
+        "sendBody": true,
+        "specifyBody": "=json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={\n  \"instance_id\": \"YOUR_WA_INSTANCE_ID\",\n  \"access_token\": \"YOUR_WA_ACCESS_TOKEN\",\n  \"chatId\": \"{{ $json.chatId }}\",\n  \"message\": {{ JSON.stringify($json.message_body) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2656,
+        1312
+      ],
+      "id": "65c9eef8-818f-471c-9e0f-db179a4424b5",
+      "name": "HTTP Request8",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request5": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Download file1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger2": {
+      "main": [
+        [
+          {
+            "node": "Download file2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file1": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file2": {
+      "main": [
+        [
+          {
+            "node": "Extract from File2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request6": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items1": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request7": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request8": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "2b6ca356-e319-4aec-b92d-abfd2c47cacc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dfec1124685a89760b53386f0f3efe301d4d5249f0d9ba5baea3a3e2f4a4b786"
+  },
+  "id": "GSHdhDnePSojLH8Zf10un",
+  "tags": []
+}
